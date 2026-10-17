@@ -73,7 +73,7 @@ Images are downscaled to 1600 px on the longest side before sending. That's for 
 
 ## Honesty section: what it can't do
 
-- **API keys live in a plain file** (`~/Library/Application Support/dev.luthfi.ngambang/settings.json`, mode 0600), not the Keychain. Fine for a toy, not for your production master key. Use a scoped key.
+- **API keys live in a plain file** (`settings.json` in the app's folder under `~/Library/Application Support`, mode 0600), not the Keychain. Fine for a toy, not for your production master key. Use a scoped key.
 - **API providers are plain chat.** No tools, no file access, no web. Only the Claude Code provider can touch your machine, and even then it can't ask permission (see below).
 - **Non-Claude providers need vision-capable models** if you want screenshots to work. A text-only model will politely complain.
 This is a **minimal** chat bubble, not a replacement for your terminal.
