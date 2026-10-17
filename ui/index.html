@@ -53,45 +53,45 @@
 </style>
 </head>
 <body>
-<button id="bubble" title="Buka">✦</button>
+<button id="bubble" title="Open">✦</button>
 <div id="app">
   <header data-tauri-drag-region>
     <span class="dot"></span><span class="title" data-tauri-drag-region id="title">Claude</span>
     <button id="gear" title="Settings">⚙</button>
-    <button id="new" title="Chat baru">✎</button>
+    <button id="new" title="New chat">✎</button>
     <button id="min" title="Minimize">–</button>
-    <button id="close" title="Tutup (keluar)">✕</button>
+    <button id="close" title="Quit">✕</button>
   </header>
   <div id="log"></div>
   <div id="settings">
-    <header data-tauri-drag-region><span class="title" data-tauri-drag-region>Settings</span><button id="setclose" title="Tutup">✕</button></header>
+    <header data-tauri-drag-region><span class="title" data-tauri-drag-region>Settings</span><button id="setclose" title="Close">✕</button></header>
     <div class="body">
       <label>AI provider
         <select id="provider">
-          <option value="claude-cli">Claude Code (CLI lokal)</option>
+          <option value="claude-cli">Claude Code (local CLI)</option>
           <option value="anthropic">Anthropic API</option>
           <option value="openai">OpenAI-compatible API</option>
         </select>
       </label>
       <div id="apifields" style="display:none; flex-direction:column; gap:10px">
-        <label id="presetbox">Preset (contoh, bisa diedit)
-          <select id="preset"><option value="">— pilih —</option></select>
+        <label id="presetbox">Preset (examples, editable)
+          <select id="preset"><option value="">— choose —</option></select>
         </label>
         <label>Base URL <input id="baseurl" placeholder="https://api.openai.com/v1" spellcheck="false"></label>
-        <label>API key <input id="apikey" type="password" placeholder="kosongkan untuk server lokal (Ollama, LM Studio)" spellcheck="false"></label>
-        <label>Model <input id="model" placeholder="mis. gpt-4o-mini" spellcheck="false"></label>
-        <label>System prompt (opsional) <textarea id="sysprompt"></textarea></label>
+        <label>API key <input id="apikey" type="password" placeholder="leave empty for local servers (Ollama, LM Studio)" spellcheck="false"></label>
+        <label>Model <input id="model" placeholder="e.g. gpt-4o-mini" spellcheck="false"></label>
+        <label>System prompt (optional) <textarea id="sysprompt"></textarea></label>
       </div>
       <div class="hint" id="hint"></div>
     </div>
-    <div class="row"><button id="setcancel">Batal</button><button id="save">Simpan</button></div>
+    <div class="row"><button id="setcancel">Cancel</button><button id="save">Save</button></div>
   </div>
   <div id="attach"></div>
   <footer>
-    <button id="shot" title="Screenshot area (pilih area layar)">▣</button>
-    <button id="auto" title="Mode layar: tiap kirim pesan, otomatis sertakan screenshot seluruh layar">◉</button>
-    <textarea id="input" rows="1" placeholder="Pesan… (Enter kirim, Shift+Enter baris baru)"></textarea>
-    <button id="send" title="Kirim">↑</button>
+    <button id="shot" title="Screenshot a region (drag to select)">▣</button>
+    <button id="auto" title="Screen mode: attach a full-screen screenshot to every message you send">◉</button>
+    <textarea id="input" rows="1" placeholder="Message… (Enter to send, Shift+Enter for new line)"></textarea>
+    <button id="send" title="Send">↑</button>
   </footer>
 </div>
 <script>
@@ -107,7 +107,7 @@ const md = (s) => esc(s)
   .replace(/`([^`\n]+)`/g, "<code>$1</code>")
   .replace(/\*\*([^*\n]+)\*\*/g, "<b>$1</b>");
 
-function empty() { log.innerHTML = '<div class="empty">Tanya apa aja ke Claude.<br>⌥Space untuk tampil/sembunyi.</div>'; }
+function empty() { log.innerHTML = '<div class="empty">Ask Claude anything.<br>⌥Space to show/hide.</div>'; }
 function add(cls, text) {
   if (log.querySelector(".empty")) log.innerHTML = "";
   const d = document.createElement("div"); d.className = cls;
@@ -133,7 +133,7 @@ function renderAttach() {
 }
 async function grab(interactive) {
   try { images.push(await invoke("capture", { interactive })); renderAttach(); return true; }
-  catch (e) { if (!String(e).includes("dibatalkan")) add("status", String(e)); return false; }
+  catch (e) { if (!String(e).includes("cancelled")) add("status", String(e)); return false; }
 }
 
 async function submit() {
@@ -194,23 +194,23 @@ const PRESETS = {
   "Groq": ["https://api.groq.com/openai/v1", "llama-3.3-70b-versatile"],
   "Gemini": ["https://generativelanguage.googleapis.com/v1beta/openai", "gemini-2.0-flash"],
   "DeepSeek": ["https://api.deepseek.com/v1", "deepseek-chat"],
-  "Ollama (lokal)": ["http://localhost:11434/v1", "llama3.2"],
-  "LM Studio (lokal)": ["http://localhost:1234/v1", ""],
+  "Ollama (local)": ["http://localhost:11434/v1", "llama3.2"],
+  "LM Studio (local)": ["http://localhost:1234/v1", ""],
 };
 for (const k of Object.keys(PRESETS)) $("preset").add(new Option(k, k));
 const LABELS = { "claude-cli": "Claude Code", anthropic: "Anthropic", openai: "OpenAI-compatible" };
 const HINTS = {
-  "claude-cli": "Memakai Claude Code yang sudah terpasang dan login di Mac ini. Tidak perlu API key.",
-  anthropic: "Memakai API Anthropic langsung. Kosongkan Base URL untuk default (api.anthropic.com).",
-  openai: "Cocok untuk OpenAI, OpenRouter, Groq, Gemini, DeepSeek, Ollama, LM Studio, dan server lain dengan format /chat/completions.",
+  "claude-cli": "Uses the Claude Code already installed and logged in on this Mac. No API key needed.",
+  anthropic: "Uses the Anthropic API directly. Leave Base URL empty for the default (api.anthropic.com).",
+  openai: "Works with OpenAI, OpenRouter, Groq, Gemini, DeepSeek, Ollama, LM Studio, and any server speaking /chat/completions.",
 };
 function syncProviderUI() {
   const p = $("provider").value;
   $("apifields").style.display = p === "claude-cli" ? "none" : "flex";
   $("presetbox").style.display = p === "openai" ? "flex" : "none";
   $("baseurl").placeholder = p === "anthropic" ? "https://api.anthropic.com" : "https://api.openai.com/v1";
-  $("model").placeholder = p === "anthropic" ? "mis. claude-sonnet-5-5" : "mis. gpt-4o-mini";
-  $("hint").textContent = HINTS[p] + (p === "claude-cli" ? "" : " API key disimpan di file lokal (izin 0600), bukan di Keychain.");
+  $("model").placeholder = p === "anthropic" ? "e.g. claude-sonnet-5-5" : "e.g. gpt-4o-mini";
+  $("hint").textContent = HINTS[p] + (p === "claude-cli" ? "" : " The API key is stored in a local file (mode 0600), not in the Keychain.");
 }
 function refreshTitle(st) { $("title").textContent = st.provider === "claude-cli" || !st.provider ? "Claude" : (st.model || LABELS[st.provider]); }
 async function loadSettings() {

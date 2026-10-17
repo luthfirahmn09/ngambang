@@ -57,7 +57,7 @@ fn get_settings(state: State<Chat>) -> Settings {
 #[tauri::command]
 fn save_settings(app: AppHandle, state: State<Chat>, settings: Settings) -> Result<(), String> {
     use std::os::unix::fs::PermissionsExt;
-    let path = settings_path(&app).ok_or("Tidak bisa menentukan folder config")?;
+    let path = settings_path(&app).ok_or("Could not determine the config folder")?;
     std::fs::create_dir_all(path.parent().unwrap()).map_err(|e| e.to_string())?;
     std::fs::write(&path, serde_json::to_vec_pretty(&settings).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).map_err(|e| e.to_string())?;
@@ -100,7 +100,7 @@ fn find_claude() -> Option<String> {
 
 /// Starts one long-lived `claude -p` process; it is reused for every turn so startup cost is paid once.
 fn spawn_claude(app: &AppHandle, state: &Chat) -> Result<(), String> {
-    let claude = find_claude().ok_or("Claude CLI tidak ketemu. Install Claude Code dulu.")?;
+    let claude = find_claude().ok_or("Claude CLI not found. Install Claude Code first.")?;
     let mut cmd = Command::new(claude);
     cmd.args([
         "-p", "--input-format", "stream-json", "--output-format", "stream-json",
@@ -139,7 +139,7 @@ fn send(app: AppHandle, state: State<Chat>, prompt: String, images: Vec<String>)
     let settings = state.settings.lock().unwrap().clone();
     if settings.uses_api() {
         if settings.model.trim().is_empty() {
-            return Err("Model belum diisi. Buka ⚙ Settings.".into());
+            return Err("No model set. Open ⚙ Settings.".into());
         }
         let hist = {
             let mut h = state.history.lock().unwrap();
@@ -170,7 +170,7 @@ fn send(app: AppHandle, state: State<Chat>, prompt: String, images: Vec<String>)
     content.push(serde_json::json!({ "type": "text", "text": prompt }));
     let msg = serde_json::json!({ "type": "user", "message": { "role": "user", "content": content } });
     let mut guard = state.stdin.lock().unwrap();
-    let stdin = guard.as_mut().ok_or("Claude tidak jalan")?;
+    let stdin = guard.as_mut().ok_or("Claude is not running")?;
     writeln!(stdin, "{msg}").and_then(|_| stdin.flush()).map_err(|e| e.to_string())
 }
 
@@ -192,7 +192,7 @@ async fn capture(window: WebviewWindow, interactive: bool) -> Result<String, Str
     let _ = window.show();
     let _ = window.set_focus();
     if !status.map_err(|e| e.to_string())?.success() || !path.exists() {
-        return Err("Capture dibatalkan".into()); // e.g. Esc during region select
+        return Err("Capture cancelled".into()); // e.g. Esc during region select
     }
     // Retina shots are huge; cap the longest side to keep the request small.
     let _ = Command::new("/usr/bin/sips").args(["-Z", "1600"]).arg(&path).output();
@@ -312,8 +312,8 @@ fn main() {
 
             app.global_shortcut().register(Shortcut::new(Some(Modifiers::ALT), Code::Space))?;
 
-            let show = MenuItem::with_id(app, "toggle", "Tampil / Sembunyi (⌥Space)", true, None::<&str>)?;
-            let quit = MenuItem::with_id(app, "quit", "Keluar", true, None::<&str>)?;
+            let show = MenuItem::with_id(app, "toggle", "Show / Hide (⌥Space)", true, None::<&str>)?;
+            let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
             TrayIconBuilder::new()
                 .icon(app.default_window_icon().unwrap().clone())
                 .menu(&Menu::with_items(app, &[&show, &quit])?)
