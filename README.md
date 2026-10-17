@@ -30,7 +30,25 @@ Written in Rust with [Tauri](https://tauri.app) and a single HTML file, because 
 
 ## Install
 
-Needs macOS and [Rust](https://rustup.rs). For the default provider, [Claude Code](https://claude.com/claude-code) must be installed and logged in. If you'd rather use an API key (or a local model), skip that and set it up in ⚙ Settings.
+### Easy way: download the DMG (no Rust, no terminal gymnastics)
+
+1. Grab **`Ngambang_0.1.0_aarch64.dmg`** from the [latest release](https://github.com/luthfirahmn09/ngambang/releases/latest).
+2. Open it and drag **Ngambang** into **Applications**.
+3. Launch it. A little bubble icon appears in the menu bar. Press `⌥Space`.
+
+Apple Silicon Macs only for now (the `aarch64` in the name). Intel owners, see "Build it yourself" below and bring snacks.
+
+The app isn't signed or notarized (that costs $99 a year and we have a noodle budget), so macOS may say it's "damaged" or from an "unidentified developer". It isn't damaged, it's just dramatic. Either right-click the app → **Open**, or run this once:
+
+```sh
+xattr -cr /Applications/Ngambang.app
+```
+
+For the default provider you still need [Claude Code](https://claude.com/claude-code) installed and logged in. Don't have it? Open ⚙ Settings and use an API key or a local model instead.
+
+### Build it yourself
+
+Needs macOS and [Rust](https://rustup.rs).
 
 ```sh
 git clone https://github.com/luthfirahmn09/ngambang.git
@@ -40,8 +58,6 @@ cd ngambang
 ```
 
 First build installs `tauri-cli` and compiles half the internet, so go refill your coffee.
-
-If macOS gets dramatic on first launch (the app is not blessed by Apple), right-click → Open, once. Peace follows.
 
 For screenshots, allow **Screen Recording** in System Settings → Privacy & Security, then reopen the app. The permission is tied to the installed app, so granting it to a `cargo run` build won't carry over.
 
