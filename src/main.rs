@@ -1,3 +1,6 @@
+mod api;
+
+use api::{Msg, Settings};
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::Mutex;
@@ -35,6 +38,48 @@ struct Chat {
     stdin: Mutex<Option<ChildStdin>>,
     /// Size to restore when expanding from the collapsed bubble.
     expanded: Mutex<Option<LogicalSize<f64>>>,
+    settings: Mutex<Settings>,
+    /// Conversation so far, for API providers (the Claude CLI keeps its own session).
+    history: Mutex<Vec<Msg>>,
+    task: Mutex<Option<tauri::async_runtime::JoinHandle<()>>>,
+}
+
+fn settings_path(app: &AppHandle) -> Option<std::path::PathBuf> {
+    app.path().app_config_dir().ok().map(|d| d.join("settings.json"))
+}
+
+#[tauri::command]
+fn get_settings(state: State<Chat>) -> Settings {
+    state.settings.lock().unwrap().clone()
+}
+
+/// Persists settings (API key included, file mode 0600) and resets the conversation.
+#[tauri::command]
+fn save_settings(app: AppHandle, state: State<Chat>, settings: Settings) -> Result<(), String> {
+    use std::os::unix::fs::PermissionsExt;
+    let path = settings_path(&app).ok_or("Tidak bisa menentukan folder config")?;
+    std::fs::create_dir_all(path.parent().unwrap()).map_err(|e| e.to_string())?;
+    std::fs::write(&path, serde_json::to_vec_pretty(&settings).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).map_err(|e| e.to_string())?;
+    *state.settings.lock().unwrap() = settings;
+    reset_chat(&state);
+    Ok(())
+}
+
+/// Cancels any reply in flight and forgets the conversation.
+fn reset_chat(state: &Chat) {
+    if let Some(c) = state.child.lock().unwrap().as_mut() {
+        let _ = c.kill();
+    }
+    if let Some(t) = state.task.lock().unwrap().take() {
+        t.abort();
+    }
+    state.history.lock().unwrap().clear();
+}
+
+#[tauri::command]
+fn reset(state: State<Chat>) {
+    reset_chat(&state);
 }
 
 fn find_claude() -> Option<String> {
@@ -91,6 +136,30 @@ fn spawn_claude(app: &AppHandle, state: &Chat) -> Result<(), String> {
 
 #[tauri::command]
 fn send(app: AppHandle, state: State<Chat>, prompt: String, images: Vec<String>) -> Result<(), String> {
+    let settings = state.settings.lock().unwrap().clone();
+    if settings.uses_api() {
+        if settings.model.trim().is_empty() {
+            return Err("Model belum diisi. Buka ⚙ Settings.".into());
+        }
+        let hist = {
+            let mut h = state.history.lock().unwrap();
+            h.push(Msg { role: "user".into(), text: prompt, images });
+            h.clone()
+        };
+        let app2 = app.clone();
+        let handle = tauri::async_runtime::spawn(async move {
+            let err = match api::stream_reply(&app2, &settings, &hist).await {
+                Ok(text) => {
+                    app2.state::<Chat>().history.lock().unwrap().push(Msg { role: "assistant".into(), text, images: vec![] });
+                    None
+                }
+                Err(e) => Some(e),
+            };
+            let _ = app2.emit("api-done", serde_json::json!({ "error": err }));
+        });
+        *state.task.lock().unwrap() = Some(handle);
+        return Ok(());
+    }
     if state.stdin.lock().unwrap().is_none() {
         spawn_claude(&app, &state)?;
     }
@@ -135,7 +204,7 @@ async fn capture(window: WebviewWindow, interactive: bool) -> Result<String, Str
 /// Warm up the process at launch so the first message is fast too.
 #[tauri::command]
 fn warm(app: AppHandle, state: State<Chat>) {
-    if state.stdin.lock().unwrap().is_none() {
+    if !state.settings.lock().unwrap().uses_api() && state.stdin.lock().unwrap().is_none() {
         let _ = spawn_claude(&app, &state);
     }
 }
@@ -153,6 +222,9 @@ fn quit(app: AppHandle, state: State<Chat>) {
 fn stop(state: State<Chat>) {
     if let Some(c) = state.child.lock().unwrap().as_mut() {
         let _ = c.kill();
+    }
+    if let Some(t) = state.task.lock().unwrap().take() {
+        t.abort();
     }
 }
 
@@ -226,8 +298,14 @@ fn main() {
                 })
                 .build(),
         )
-        .invoke_handler(tauri::generate_handler![send, capture, warm, stop, quit, set_collapsed])
+        .invoke_handler(tauri::generate_handler![send, capture, warm, stop, reset, quit, get_settings, save_settings, set_collapsed])
         .setup(|app| {
+            if let Some(saved) = settings_path(app.handle())
+                .and_then(|p| std::fs::read(p).ok())
+                .and_then(|b| serde_json::from_slice::<Settings>(&b).ok())
+            {
+                *app.state::<Chat>().settings.lock().unwrap() = saved;
+            }
             app.set_activation_policy(ActivationPolicy::Accessory); // no Dock icon; needed to overlay fullscreen
             let win = app.get_webview_window("main").unwrap();
             float_over_fullscreen(&win);

@@ -6,7 +6,7 @@
   :root { color-scheme: dark; --fg: #eee; --dim: #999; --accent: #f08228; }
   * { box-sizing: border-box; margin: 0; }
   html, body { height: 100%; background: transparent; font: 13px -apple-system, system-ui, sans-serif; color: var(--fg); overflow: hidden; }
-  #app { height: 100%; display: flex; flex-direction: column; background: rgba(28,28,30,.88); backdrop-filter: blur(24px);
+  #app { position: relative; height: 100%; display: flex; flex-direction: column; background: rgba(28,28,30,.88); backdrop-filter: blur(24px);
          border: 1px solid rgba(255,255,255,.12); border-radius: 14px; overflow: hidden; }
   header { display: flex; align-items: center; gap: 8px; padding: 9px 12px; border-bottom: 1px solid rgba(255,255,255,.08); }
   header .title { font-weight: 600; flex: 1; }
@@ -37,6 +37,17 @@
   #auto.on { color: var(--accent); }
   #send { color: var(--accent); font-size: 20px; }
   #bubble { display: none; width: 100%; height: 100%; border-radius: 50%; background: var(--accent); color: #fff; font-size: 24px; }
+  #settings { display: none; position: absolute; inset: 0; z-index: 10; background: rgba(28,28,30,.98); flex-direction: column; border-radius: 14px; }
+  #settings.open { display: flex; }
+  #settings .body { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+  #settings label { display: flex; flex-direction: column; gap: 4px; color: var(--dim); font-size: 11px; }
+  #settings input, #settings select, #settings textarea { background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.12); border-radius: 6px;
+    color: var(--fg); font: 13px inherit; padding: 6px 8px; outline: 0; }
+  #settings textarea { resize: vertical; min-height: 54px; max-height: 120px; }
+  #settings .hint { color: var(--dim); font-size: 11px; line-height: 1.4; }
+  #settings .row { display: flex; gap: 8px; justify-content: flex-end; padding: 10px; border-top: 1px solid rgba(255,255,255,.08); }
+  #settings .row button { background: rgba(255,255,255,.1); color: var(--fg); font-size: 13px; padding: 5px 12px; border-radius: 6px; }
+  #settings .row #save { background: var(--accent); color: #fff; }
   .collapsed #app { display: none; }
   .collapsed #bubble { display: block; }
 </style>
@@ -45,12 +56,36 @@
 <button id="bubble" title="Buka">✦</button>
 <div id="app">
   <header data-tauri-drag-region>
-    <span class="dot"></span><span class="title" data-tauri-drag-region>Claude</span>
+    <span class="dot"></span><span class="title" data-tauri-drag-region id="title">Claude</span>
+    <button id="gear" title="Settings">⚙</button>
     <button id="new" title="Chat baru">✎</button>
     <button id="min" title="Minimize">–</button>
     <button id="close" title="Tutup (keluar)">✕</button>
   </header>
   <div id="log"></div>
+  <div id="settings">
+    <header data-tauri-drag-region><span class="title" data-tauri-drag-region>Settings</span><button id="setclose" title="Tutup">✕</button></header>
+    <div class="body">
+      <label>AI provider
+        <select id="provider">
+          <option value="claude-cli">Claude Code (CLI lokal)</option>
+          <option value="anthropic">Anthropic API</option>
+          <option value="openai">OpenAI-compatible API</option>
+        </select>
+      </label>
+      <div id="apifields" style="display:none; flex-direction:column; gap:10px">
+        <label id="presetbox">Preset (contoh, bisa diedit)
+          <select id="preset"><option value="">— pilih —</option></select>
+        </label>
+        <label>Base URL <input id="baseurl" placeholder="https://api.openai.com/v1" spellcheck="false"></label>
+        <label>API key <input id="apikey" type="password" placeholder="kosongkan untuk server lokal (Ollama, LM Studio)" spellcheck="false"></label>
+        <label>Model <input id="model" placeholder="mis. gpt-4o-mini" spellcheck="false"></label>
+        <label>System prompt (opsional) <textarea id="sysprompt"></textarea></label>
+      </div>
+      <div class="hint" id="hint"></div>
+    </div>
+    <div class="row"><button id="setcancel">Batal</button><button id="save">Simpan</button></div>
+  </div>
   <div id="attach"></div>
   <footer>
     <button id="shot" title="Screenshot area (pilih area layar)">▣</button>
@@ -129,6 +164,14 @@ listen("claude-line", ({ payload }) => {
   }
   if (o.type === "result") setBusy(false);
 });
+listen("api-delta", ({ payload }) => {
+  if (!cur) { hideTyping(); cur = add("assistant", ""); curText = ""; }
+  curText += payload; cur.innerHTML = md(curText); log.scrollTop = log.scrollHeight;
+});
+listen("api-done", ({ payload }) => {
+  setBusy(false);
+  if (payload.error) add("status", "Error: " + payload.error);
+});
 listen("claude-done", ({ payload }) => {
   setBusy(false);
   if (payload.code && payload.code !== 0 && payload.stderr) add("status", "Error: " + payload.stderr.slice(0, 300));
@@ -136,15 +179,59 @@ listen("claude-done", ({ payload }) => {
 
 input.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); submit(); } });
 input.addEventListener("input", () => { input.style.height = "auto"; input.style.height = input.scrollHeight + "px"; });
-$("send").onclick = () => (busy ? invoke("stop") : submit());
-$("new").onclick = () => { invoke("stop"); setBusy(false); empty(); };
+$("send").onclick = () => { if (busy) { invoke("stop"); setBusy(false); } else submit(); };
+$("new").onclick = () => { invoke("reset"); setBusy(false); empty(); };
 $("min").onclick = async () => { await invoke("set_collapsed", { collapsed: true }); document.body.classList.add("collapsed"); };
 $("bubble").onclick = async () => { await invoke("set_collapsed", { collapsed: false }); document.body.classList.remove("collapsed"); input.focus(); };
 $("shot").onclick = async () => { await grab(true); input.focus(); };
 $("auto").onclick = () => { autoScreen = !autoScreen; $("auto").classList.toggle("on", autoScreen); };
 $("close").onclick = () => invoke("quit");
 empty();
-invoke("warm");
+
+const PRESETS = {
+  "OpenAI": ["https://api.openai.com/v1", "gpt-4o-mini"],
+  "OpenRouter": ["https://openrouter.ai/api/v1", "openai/gpt-4o-mini"],
+  "Groq": ["https://api.groq.com/openai/v1", "llama-3.3-70b-versatile"],
+  "Gemini": ["https://generativelanguage.googleapis.com/v1beta/openai", "gemini-2.0-flash"],
+  "DeepSeek": ["https://api.deepseek.com/v1", "deepseek-chat"],
+  "Ollama (lokal)": ["http://localhost:11434/v1", "llama3.2"],
+  "LM Studio (lokal)": ["http://localhost:1234/v1", ""],
+};
+for (const k of Object.keys(PRESETS)) $("preset").add(new Option(k, k));
+const LABELS = { "claude-cli": "Claude Code", anthropic: "Anthropic", openai: "OpenAI-compatible" };
+const HINTS = {
+  "claude-cli": "Memakai Claude Code yang sudah terpasang dan login di Mac ini. Tidak perlu API key.",
+  anthropic: "Memakai API Anthropic langsung. Kosongkan Base URL untuk default (api.anthropic.com).",
+  openai: "Cocok untuk OpenAI, OpenRouter, Groq, Gemini, DeepSeek, Ollama, LM Studio, dan server lain dengan format /chat/completions.",
+};
+function syncProviderUI() {
+  const p = $("provider").value;
+  $("apifields").style.display = p === "claude-cli" ? "none" : "flex";
+  $("presetbox").style.display = p === "openai" ? "flex" : "none";
+  $("baseurl").placeholder = p === "anthropic" ? "https://api.anthropic.com" : "https://api.openai.com/v1";
+  $("model").placeholder = p === "anthropic" ? "mis. claude-sonnet-5-5" : "mis. gpt-4o-mini";
+  $("hint").textContent = HINTS[p] + (p === "claude-cli" ? "" : " API key disimpan di file lokal (izin 0600), bukan di Keychain.");
+}
+function refreshTitle(st) { $("title").textContent = st.provider === "claude-cli" || !st.provider ? "Claude" : (st.model || LABELS[st.provider]); }
+async function loadSettings() {
+  const st = await invoke("get_settings");
+  $("provider").value = st.provider || "claude-cli";
+  $("baseurl").value = st.base_url || ""; $("apikey").value = st.api_key || "";
+  $("model").value = st.model || ""; $("sysprompt").value = st.system_prompt || "";
+  syncProviderUI(); refreshTitle(st); return st;
+}
+$("provider").onchange = syncProviderUI;
+$("preset").onchange = () => { const p = PRESETS[$("preset").value]; if (p) { $("baseurl").value = p[0]; $("model").value = p[1]; } };
+$("gear").onclick = async () => { await loadSettings(); $("settings").classList.add("open"); };
+const closeSettings = () => $("settings").classList.remove("open");
+$("setclose").onclick = $("setcancel").onclick = closeSettings;
+$("save").onclick = async () => {
+  const st = { provider: $("provider").value, base_url: $("baseurl").value.trim(), api_key: $("apikey").value.trim(),
+               model: $("model").value.trim(), system_prompt: $("sysprompt").value };
+  try { await invoke("save_settings", { settings: st }); } catch (e) { add("status", String(e)); return; }
+  refreshTitle(st); setBusy(false); empty(); closeSettings(); invoke("warm");
+};
+loadSettings().then(() => invoke("warm"));
 </script>
 </body>
 </html>
