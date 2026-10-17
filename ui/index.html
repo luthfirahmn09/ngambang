@@ -1,0 +1,150 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  :root { color-scheme: dark; --fg: #eee; --dim: #999; --accent: #f08228; }
+  * { box-sizing: border-box; margin: 0; }
+  html, body { height: 100%; background: transparent; font: 13px -apple-system, system-ui, sans-serif; color: var(--fg); overflow: hidden; }
+  #app { height: 100%; display: flex; flex-direction: column; background: rgba(28,28,30,.88); backdrop-filter: blur(24px);
+         border: 1px solid rgba(255,255,255,.12); border-radius: 14px; overflow: hidden; }
+  header { display: flex; align-items: center; gap: 8px; padding: 9px 12px; border-bottom: 1px solid rgba(255,255,255,.08); }
+  header .title { font-weight: 600; flex: 1; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: #34c759; }
+  .busy .dot { background: var(--accent); animation: pulse 1s infinite; }
+  @keyframes pulse { 50% { opacity: .3; } }
+  button { background: none; border: 0; color: var(--dim); font-size: 15px; cursor: pointer; padding: 2px 4px; }
+  button:hover { color: var(--fg); }
+  #log { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 8px; user-select: text; }
+  .empty { color: var(--dim); text-align: center; margin-top: 40px; line-height: 1.6; }
+  .user { align-self: flex-end; max-width: 85%; background: #0a84ff; padding: 6px 10px; border-radius: 10px; white-space: pre-wrap; }
+  .assistant { white-space: pre-wrap; line-height: 1.45; }
+  .assistant code { background: rgba(255,255,255,.1); padding: 1px 4px; border-radius: 4px; font: 12px ui-monospace, monospace; }
+  .assistant pre { background: rgba(0,0,0,.35); padding: 8px; border-radius: 8px; overflow-x: auto; margin: 4px 0; }
+  .assistant pre code { background: none; padding: 0; }
+  .typing { display: flex; gap: 4px; padding: 4px 0; }
+  .typing i { width: 6px; height: 6px; border-radius: 50%; background: var(--dim); animation: bounce 1.2s infinite; }
+  .typing i:nth-child(2) { animation-delay: .15s; } .typing i:nth-child(3) { animation-delay: .3s; }
+  @keyframes bounce { 0%, 60%, 100% { transform: translateY(0); opacity: .4; } 30% { transform: translateY(-4px); opacity: 1; } }
+  .status { color: var(--dim); font-size: 11px; }
+  footer { display: flex; align-items: flex-end; gap: 8px; padding: 10px; border-top: 1px solid rgba(255,255,255,.08); }
+  textarea { flex: 1; background: none; border: 0; outline: 0; color: var(--fg); font: inherit; resize: none; max-height: 100px; }
+  #attach { display: none; gap: 6px; padding: 6px 10px 0; flex-wrap: wrap; }
+  #attach .chip { position: relative; }
+  #attach img, .user img { height: 48px; border-radius: 6px; display: block; }
+  #attach .chip b { position: absolute; top: -5px; right: -5px; background: #444; border-radius: 50%; width: 15px; height: 15px; font-size: 10px; text-align: center; line-height: 15px; cursor: pointer; }
+  .user img { height: 64px; margin-bottom: 4px; }
+  #auto.on { color: var(--accent); }
+  #send { color: var(--accent); font-size: 20px; }
+  #bubble { display: none; width: 100%; height: 100%; border-radius: 50%; background: var(--accent); color: #fff; font-size: 24px; }
+  .collapsed #app { display: none; }
+  .collapsed #bubble { display: block; }
+</style>
+</head>
+<body>
+<button id="bubble" title="Buka">✦</button>
+<div id="app">
+  <header data-tauri-drag-region>
+    <span class="dot"></span><span class="title" data-tauri-drag-region>Claude</span>
+    <button id="new" title="Chat baru">✎</button>
+    <button id="min" title="Minimize">–</button>
+    <button id="close" title="Tutup (keluar)">✕</button>
+  </header>
+  <div id="log"></div>
+  <div id="attach"></div>
+  <footer>
+    <button id="shot" title="Screenshot area (pilih area layar)">▣</button>
+    <button id="auto" title="Mode layar: tiap kirim pesan, otomatis sertakan screenshot seluruh layar">◉</button>
+    <textarea id="input" rows="1" placeholder="Pesan… (Enter kirim, Shift+Enter baris baru)"></textarea>
+    <button id="send" title="Kirim">↑</button>
+  </footer>
+</div>
+<script>
+const { invoke } = window.__TAURI__.core;
+const { listen } = window.__TAURI__.event;
+const $ = (id) => document.getElementById(id);
+const log = $("log"), input = $("input");
+let images = [], autoScreen = false, busy = false, cur = null, curText = "";
+
+const esc = (s) => s.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+const md = (s) => esc(s)
+  .replace(/```(?:\w*\n)?([\s\S]*?)(?:```|$)/g, "<pre><code>$1</code></pre>")
+  .replace(/`([^`\n]+)`/g, "<code>$1</code>")
+  .replace(/\*\*([^*\n]+)\*\*/g, "<b>$1</b>");
+
+function empty() { log.innerHTML = '<div class="empty">Tanya apa aja ke Claude.<br>⌥Space untuk tampil/sembunyi.</div>'; }
+function add(cls, text) {
+  if (log.querySelector(".empty")) log.innerHTML = "";
+  const d = document.createElement("div"); d.className = cls;
+  if (cls === "assistant") d.innerHTML = md(text); else d.textContent = text;
+  log.appendChild(d); log.scrollTop = log.scrollHeight; return d;
+}
+let typing = null;
+function showTyping() {
+  hideTyping(); typing = document.createElement("div"); typing.className = "typing";
+  typing.innerHTML = "<i></i><i></i><i></i>"; log.appendChild(typing); log.scrollTop = log.scrollHeight;
+}
+function hideTyping() { typing?.remove(); typing = null; }
+function setBusy(b) { busy = b; if (b) showTyping(); else hideTyping(); $("app").classList.toggle("busy", b); $("send").textContent = b ? "■" : "↑"; }
+
+function renderAttach() {
+  const box = $("attach"); box.innerHTML = ""; box.style.display = images.length ? "flex" : "none";
+  images.forEach((b64, i) => {
+    const c = document.createElement("div"); c.className = "chip";
+    c.innerHTML = `<img src="data:image/png;base64,${b64}"><b>✕</b>`;
+    c.querySelector("b").onclick = () => { images.splice(i, 1); renderAttach(); };
+    box.appendChild(c);
+  });
+}
+async function grab(interactive) {
+  try { images.push(await invoke("capture", { interactive })); renderAttach(); return true; }
+  catch (e) { if (!String(e).includes("dibatalkan")) add("status", String(e)); return false; }
+}
+
+async function submit() {
+  const text = input.value.trim();
+  if (!text || busy) return;
+  if (autoScreen) await grab(false);
+  const imgs = images; images = []; renderAttach();
+  input.value = ""; input.style.height = "auto";
+  const u = add("user", text);
+  imgs.forEach((b) => { const im = new Image(); im.src = "data:image/png;base64," + b; u.prepend(im); });
+  cur = null; curText = ""; setBusy(true);
+  try { await invoke("send", { prompt: text, images: imgs }); }
+  catch (e) { add("status", String(e)); setBusy(false); }
+}
+
+listen("claude-line", ({ payload }) => {
+  let o; try { o = JSON.parse(payload); } catch { return; }
+  if (o.type === "stream_event") {
+    const ev = o.event;
+    if (ev.type === "content_block_delta" && ev.delta?.type === "text_delta") {
+      if (!cur) { hideTyping(); cur = add("assistant", ""); curText = ""; }
+      curText += ev.delta.text; cur.innerHTML = md(curText); log.scrollTop = log.scrollHeight;
+    } else if (ev.type === "content_block_start" && ev.content_block?.type === "tool_use") {
+      cur = null; hideTyping(); add("status", "⚙ " + ev.content_block.name); showTyping();
+    }
+  } else if (o.type === "result" && !curText && typeof o.result === "string") {
+    add("assistant", o.result);
+  }
+  if (o.type === "result") setBusy(false);
+});
+listen("claude-done", ({ payload }) => {
+  setBusy(false);
+  if (payload.code && payload.code !== 0 && payload.stderr) add("status", "Error: " + payload.stderr.slice(0, 300));
+});
+
+input.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); submit(); } });
+input.addEventListener("input", () => { input.style.height = "auto"; input.style.height = input.scrollHeight + "px"; });
+$("send").onclick = () => (busy ? invoke("stop") : submit());
+$("new").onclick = () => { invoke("stop"); setBusy(false); empty(); };
+$("min").onclick = async () => { await invoke("set_collapsed", { collapsed: true }); document.body.classList.add("collapsed"); };
+$("bubble").onclick = async () => { await invoke("set_collapsed", { collapsed: false }); document.body.classList.remove("collapsed"); input.focus(); };
+$("shot").onclick = async () => { await grab(true); input.focus(); };
+$("auto").onclick = () => { autoScreen = !autoScreen; $("auto").classList.toggle("on", autoScreen); };
+$("close").onclick = () => invoke("quit");
+empty();
+invoke("warm");
+</script>
+</body>
+</html>
